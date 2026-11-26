@@ -169,11 +169,14 @@ final class IOSPhoneCoreActions {
             text: "启动已派发（pid=\(pid)），但系统拒绝把 \(application) 激活到前台。可以直接重试这一步。",
             isError: false, image: nil)
         }
-        // Let the scene transition finish before capturing; the old code waited
-        // for the *caller* to end up in the background, which never happens when
-        // DSH Go itself is the app that just launched something.
-        try await Task.sleep(nanoseconds: 1_500_000_000)
-        try require(live)
+        // The capture below needs this app to be in the background. A fixed sleep
+        // is only a guess; poll the real scene state instead (up to ~3 s), because
+        // observe() calls requireBackground and would otherwise fail whenever the
+        // transition is slower than the guess.
+        for _ in 0..<30 where UIApplication.shared.applicationState != .background {
+          try await Task.sleep(nanoseconds: 100_000_000)
+          try require(live)
+        }
         let reply = try await capture(execution, current: live)
         let output = try await observe(reply, execution, image: false, detail: false, current: live)
         lastOpenedApplication = application

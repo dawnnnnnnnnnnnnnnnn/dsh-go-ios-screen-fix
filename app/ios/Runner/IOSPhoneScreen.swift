@@ -564,6 +564,9 @@ final class IOSPhoneScreen {
         width: raw.width * CGFloat(width), height: raw.height * CGFloat(height))
       guard scaled.intersects(box) else { continue }
       let seen = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+      // An empty recognition would make `want.contains(seen)` true and pass a
+      // frame where the element is actually gone.
+      guard !seen.isEmpty else { continue }
       if seen == want || seen.contains(want) || want.contains(seen) { return true }
     }
     return false
