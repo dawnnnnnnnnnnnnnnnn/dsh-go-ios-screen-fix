@@ -43,12 +43,12 @@ final class IOSPhoneCoreActions {
     else { return false }
     let selector = NSSelectorFromString("openApplicationWithBundleID:")
     guard workspace.responds(to: selector) else { return false }
-    // The private call answers with a bool. Discarding it (the previous `_ =`)
-    // made "the system refused" and "the system accepted" indistinguishable,
-    // which is why a failed activation could only surface later as a timeout.
-    let answer = workspace.perform(selector, with: bundleID)
-    if let number = answer?.takeUnretainedValue() as? NSNumber { return number.boolValue }
-    return answer != nil
+    // `openApplicationWithBundleID:` returns a C BOOL. `perform` is only defined
+    // for selectors that return objects, so reading that BOOL back through
+    // Unmanaged is undefined behaviour. Send it for effect; the caller verifies
+    // the scene actually moved instead.
+    _ = workspace.perform(selector, with: bundleID)
+    return true
   }
 
   func invalidate() { epoch &+= 1; binding = nil; latestToken = nil; lastOpenedApplication = nil; screen.invalidate() }
@@ -159,28 +159,29 @@ final class IOSPhoneCoreActions {
         let opened = try await send(["op": "launch", "bundleId": application], execution, current: live)
         try require(live)
         // Same private hop that brings DSH Go back after a task, aimed at the
-        // target. Its result is now meaningful: false means the system refused
-        // the activation, so say that instead of waiting for a transition that
-        // will never happen.
-        let raised = Self.requestForeground(application)
+        // target. The call itself only proves the request was sent, so success
+        // is judged by whether this app actually left the foreground.
+        _ = Self.requestForeground(application)
         let pid = opened.metadata.pid ?? 0
-        guard raised else {
-          return IOSPhoneOutcome(
-            text: "启动已派发（pid=\(pid)），但系统拒绝把 \(application) 激活到前台。可以直接重试这一步。",
-            isError: false, image: nil)
-        }
-        // The capture below needs this app to be in the background. A fixed sleep
-        // is only a guess; poll the real scene state instead (up to ~3 s), because
-        // observe() calls requireBackground and would otherwise fail whenever the
-        // transition is slower than the guess.
-        for _ in 0..<30 where UIApplication.shared.applicationState != .background {
+        // The capture below needs this app in the background. Poll the real scene
+        // state instead of guessing a sleep, and treat "never left" as a failure
+        // the caller can retry rather than waiting for a transition that will
+        // never come.
+        var moved = false
+        for _ in 0..<30 {
+          if UIApplication.shared.applicationState == .background { moved = true; break }
           try await Task.sleep(nanoseconds: 100_000_000)
           try require(live)
+        }
+        guard moved else {
+          return IOSPhoneOutcome(
+            text: "启动已派发（pid=\(pid)），但界面没有切换过去，系统可能拒绝了这次激活。可以直接重试这一步。",
+            isError: false, image: nil)
         }
         let reply = try await capture(execution, current: live)
         let output = try await observe(reply, execution, image: false, detail: false, current: live)
         lastOpenedApplication = application
-        return IOSPhoneOutcome(text: "启动请求已派发（pid=\(pid)），系统已接受前台激活。\n" + output.text,
+        return IOSPhoneOutcome(text: "启动请求已派发（pid=\(pid)），目标已到前台。\n" + output.text,
           isError: false, image: nil)
       }
       guard await consent.waitForTarget(request, current: live) else {
