@@ -200,7 +200,7 @@ final class IOSPhoneCoreActions {
       let message: String
       if let failure = error as? IOSPhoneCoreFailure {
         execution.mayHaveActed = execution.mayHaveActed || failure.mayHaveActed
-        message = failure.code
+        message = failure.code + (failure.reason.map { "（\($0)）" } ?? "")
       } else if let failure = error as? IOSPhoneScreenError { message = failure.code }
       else if let failure = error as? IOSPhoneClipboardError { message = failure.rawValue }
       else { message = (error as? IOSPhoneOperationError)?.message ?? "手机动作未完成。" }
@@ -404,6 +404,8 @@ final class IOSPhoneCoreActions {
     try require(current)
     guard reply.status == 0, ["read", "dispatched"].contains(reply.metadata.outcome ?? "") else {
       throw IOSPhoneCoreFailure(code: reply.metadata.code ?? "ERR_PHONE_ACTION_UNCONFIRMED",
+        reason: reply.metadata.code == nil
+          ? "reply_without_code status=\(reply.status) outcome=\(reply.metadata.outcome ?? "nil")" : nil,
         mayHaveActed: execution.mayHaveActed)
     }
     return reply

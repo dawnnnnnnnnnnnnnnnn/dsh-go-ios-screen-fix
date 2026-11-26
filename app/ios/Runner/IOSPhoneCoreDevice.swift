@@ -5,6 +5,9 @@ import UIKit
 struct IOSPhoneCoreFailure: Error {
   let code: String
   var variant: String?
+  /// Why an unconfirmed result was reported. Fixed identifiers only: no user,
+  /// screen or credential data, so it is safe to show in the tool error.
+  var reason: String?
   var mayHaveActed = false
 }
 
@@ -263,9 +266,17 @@ final class IOSPhoneCoreDevice: NSObject {
     }
     let deadline = now().addingTimeInterval(["ascii", "prepareInput"].contains(operation) ? 110 : 35)
     while true {
-      guard !Task.isCancelled, current(), active === run, !run.stopping,
-        !run.terminal, !run.faulted, run.pairingGeneration == pairing.generation,
-        now() < deadline else {
+      let reason: String?
+      if Task.isCancelled { reason = "task_cancelled" }
+      else if !current() { reason = "call_not_current" }
+      else if active !== run { reason = "run_replaced" }
+      else if run.stopping { reason = "run_stopping" }
+      else if run.terminal { reason = "run_terminal" }
+      else if run.faulted { reason = "run_faulted" }
+      else if run.pairingGeneration != pairing.generation { reason = "pairing_changed" }
+      else if now() >= deadline { reason = "deadline_\(operation)" }
+      else { reason = nil }
+      if let reason {
         native.cancel(run.handle, pending.id)
         // P1: a request that ran out of time must not tear the tunnel down. The
         // run keeps its tunnel and media stream, so the next request proceeds.
@@ -279,7 +290,10 @@ final class IOSPhoneCoreDevice: NSObject {
         stop(run)
         // Dispatch may already have happened. The late result and terminal
         // callback still own cleanup, but this caller never retries/falls back.
-        return .failure(.init(code: "ERR_PHONE_ACTION_UNCONFIRMED", mayHaveActed: pending.mutating))
+        let phase = state["phase"] as? String ?? "?"
+        let code = state["code"] as? String ?? "?"
+        return .failure(.init(code: "ERR_PHONE_ACTION_UNCONFIRMED",
+          reason: "\(operation):\(reason) phase=\(phase) code=\(code)", mayHaveActed: pending.mutating))
       }
       // Cancellation, revocation and an inline native callback can all occur
       // before request() returns. A stored result is not authority to report a
