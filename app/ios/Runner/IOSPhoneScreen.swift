@@ -492,12 +492,14 @@ final class IOSPhoneScreen {
       let touchesTarget = targetRegion?.intersects(box) == true
       // A blinking caret is system-driven motion, not a target change. Judge it
       // BEFORE the text-region veto: a caret normally sits inside the text field
-      // it belongs to, where that veto would always fire.
-      let caretLike = thin && dense && spanX <= max(4, width / 120)
-        && spanY >= 4 && spanY <= max(16, height / 10) && !touchesTarget
+      // it belongs to, where that veto would always fire. The conditions
+      // themselves stay exactly as before (stable keyboard, <=1 caret, narrow).
+      let caretLike = oldKeyboard && newKeyboard && thin && dense
+        && spanX <= max(2, width / 240) && spanY >= 4 && spanY <= max(12, height / 12)
+        && !touchesTarget
       if caretLike, let focusRegion, focusRegion.intersects(box) {
         carets += 1
-        guard carets <= 2 else { return false }
+        guard carets <= 1 else { return false }
         continue
       }
       // A changed glyph/number/label is never waived as a caret or scrollbar.
