@@ -117,6 +117,10 @@ final class IOSPhoneScreen {
     let texts: [Text]
     let target: CGPoint?
     let requiresTextInput: Bool
+    /// The label of the element the caller actually named, when the tap came from
+    /// an element id rather than a raw coordinate. With it, revalidation asks
+    /// "is that element still there" instead of "did the whole screen hold still".
+    let targetText: String?
   }
 
   private enum PreviewRequest: Equatable, Sendable { case required, bestEffort }
@@ -223,6 +227,15 @@ final class IOSPhoneScreen {
     return CGPoint(x: element.bounds.midX, y: element.bounds.midY)
   }
 
+  /// Same lookup as `elementPoint`, but also returns the element's label so the
+  /// tap can be revalidated by re-finding that label instead of by comparing the
+  /// whole frame.
+  func elementTarget(screen: String, id: Int, binding: Binding) throws -> (point: CGPoint, text: String) {
+    let observation = try require(screen: screen, binding: binding)
+    guard let element = observation.elements.first(where: { $0.id == id }) else { throw IOSPhoneScreenError.invalid }
+    return (CGPoint(x: element.bounds.midX, y: element.bounds.midY), element.text)
+  }
+
   func imagePoint(screen: String, x: Double, y: Double, binding: Binding) throws -> CGPoint {
     let observation = try require(screen: screen, binding: binding)
     guard observation.imageIncluded, x.isFinite, y.isFinite, x >= 0, y >= 0,
@@ -235,7 +248,7 @@ final class IOSPhoneScreen {
   /// identity. Keyboard/layout/PiP movement can still require a new observation.
   /// Never returns the old native frame as input authority.
   func revalidate(screen: String, binding: Binding, fresh: IOSPhoneCoreReply,
-                  requiresTextInput: Bool, target: CGPoint? = nil,
+                  requiresTextInput: Bool, target: CGPoint? = nil, targetText: String? = nil,
                   current: () -> Bool) async throws -> FreshFrame {
     let observation = try require(screen: screen, binding: binding)
     invalidate()
@@ -248,8 +261,11 @@ final class IOSPhoneScreen {
     }
     let reference = MatchReference(width: observation.width, height: observation.height,
       digest: observation.digest, pixels: observation.pixels, texts: observation.texts,
-      target: target, requiresTextInput: requiresTextInput)
-    let value = try await analyze(fresh, withText: requiresTextInput, reference: reference)
+      target: target, requiresTextInput: requiresTextInput, targetText: targetText)
+    // A named element needs its label recognised again, even for a plain tap:
+    // the whole point of the element path is to re-find the element by text.
+    let value = try await analyze(fresh, withText: requiresTextInput || targetText != nil,
+      reference: reference)
     try check(ticket: ticket, binding: binding, current: current)
     guard validAge(since: observation.at, maximum: Self.observationLifetime),
       validAge(since: received, maximum: 30),
@@ -416,6 +432,15 @@ final class IOSPhoneScreen {
     guard count >= 100_000, count <= PhoneScreenLimits.pixelCount,
       pixels.count == count * 4, reference.pixels.count == pixels.count else { return false }
     if reference.requiresTextInput && reference.target == nil { return false }
+    // Element path: the caller named a control, not a picture. Only that
+    // control has to still be there. Requiring the whole frame to hold still
+    // made every tap on a live page impossible — carousels, rotating
+    // placeholders and tickers change pixels every frame, and the text ticker
+    // inside a search field sits exactly where the user wants to tap.
+    if let targetText = reference.targetText, let target = reference.target {
+      return targetStillThere(texts, targetText: targetText, target: target,
+        width: width, height: height)
+    }
     guard stableText(reference.texts, texts, width: width, height: height) else { return false }
     let oldKeyboard = keyboardHint(reference.texts)
     let newKeyboard = keyboardHint(texts)
@@ -519,6 +544,29 @@ final class IOSPhoneScreen {
       guard carets <= 1 else { return false }
     }
     return true
+  }
+
+  /// Element-path revalidation: the named label must still be recognised, and
+  /// it must still sit near the approved point. Everything else on the screen is
+  /// free to animate. Absence of the label is a refusal, so a real page change
+  /// still stops the tap.
+  nonisolated private static func targetStillThere(_ texts: [Text], targetText: String,
+                                                   target: CGPoint, width: Int, height: Int) -> Bool {
+    let want = targetText.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !want.isEmpty else { return false }
+    let x = target.x * CGFloat(width), y = target.y * CGFloat(height)
+    let radius = max(24, min(CGFloat(width), CGFloat(height)) / 6)
+    let box = CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)
+    for item in texts {
+      guard item.confidence.isFinite, item.confidence >= 0.2,
+        let raw = topLeft(item.bounds) else { continue }
+      let scaled = CGRect(x: raw.minX * CGFloat(width), y: raw.minY * CGFloat(height),
+        width: raw.width * CGFloat(width), height: raw.height * CGFloat(height))
+      guard scaled.intersects(box) else { continue }
+      let seen = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+      if seen == want || seen.contains(want) || want.contains(seen) { return true }
+    }
+    return false
   }
 
   /// Repeated OCR must preserve text and geometry; pixel tolerance cannot hide

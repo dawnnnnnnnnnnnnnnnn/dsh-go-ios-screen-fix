@@ -36,14 +36,19 @@ final class IOSPhoneCoreActions {
   // AppService can launch a process without activating its scene. This only
   // requests activation; the owned call still waits for the actual app transition.
   static func requestForeground(_ bundleID: String) -> Bool {
-    guard PhoneRunnerAppCatalog.bundleID(for: bundleID) == bundleID,
-      let type = NSClassFromString("LSApplicationWorkspace") as? NSObject.Type,
+    // No catalog gate: the catalog only lists apps whose names we can resolve,
+    // and any installed bundle identifier is a legitimate activation target.
+    guard let type = NSClassFromString("LSApplicationWorkspace") as? NSObject.Type,
       let workspace = type.perform(NSSelectorFromString("defaultWorkspace"))?.takeUnretainedValue() as? NSObject
     else { return false }
     let selector = NSSelectorFromString("openApplicationWithBundleID:")
     guard workspace.responds(to: selector) else { return false }
-    _ = workspace.perform(selector, with: bundleID)
-    return true
+    // The private call answers with a bool. Discarding it (the previous `_ =`)
+    // made "the system refused" and "the system accepted" indistinguishable,
+    // which is why a failed activation could only surface later as a timeout.
+    let answer = workspace.perform(selector, with: bundleID)
+    if let number = answer?.takeUnretainedValue() as? NSNumber { return number.boolValue }
+    return answer != nil
   }
 
   func invalidate() { epoch &+= 1; binding = nil; latestToken = nil; lastOpenedApplication = nil; screen.invalidate() }
@@ -86,11 +91,16 @@ final class IOSPhoneCoreActions {
       }
       let token = plan.screen ?? latestToken
       var point: CGPoint?
+      // When the plan names an element, keep its label: revalidation then asks
+      // "is this label still on screen" instead of "did the whole frame freeze".
+      var targetText: String?
       if plan.requiresObservation {
         guard let token, token == latestToken else { throw IOSPhoneScreenError.stale }
         switch plan.method {
         case .tap, .type:
-          point = try screen.elementPoint(screen: token, id: plan.parameters["id"] as! Int, binding: binding)
+          let element = try screen.elementTarget(screen: token, id: plan.parameters["id"] as! Int, binding: binding)
+          point = element.point
+          targetText = element.text
         case .tapXY:
           point = try screen.imagePoint(screen: token,
             x: Double(plan.parameters["x"] as! Int), y: Double(plan.parameters["y"] as! Int), binding: binding)
@@ -148,14 +158,26 @@ final class IOSPhoneCoreActions {
       if plan.method == .open, let application {
         let opened = try await send(["op": "launch", "bundleId": application], execution, current: live)
         try require(live)
-        _ = Self.requestForeground(application)
-        guard await consent.waitForTarget(request, current: live) else {
-          throw IOSPhoneOperationError(message: "应用启动已派发，但目标界面尚未核实；请核对手机，不要自动重复打开。")
+        // Same private hop that brings DSH Go back after a task, aimed at the
+        // target. Its result is now meaningful: false means the system refused
+        // the activation, so say that instead of waiting for a transition that
+        // will never happen.
+        let raised = Self.requestForeground(application)
+        let pid = opened.metadata.pid ?? 0
+        guard raised else {
+          return IOSPhoneOutcome(
+            text: "启动已派发（pid=\(pid)），但系统拒绝把 \(application) 激活到前台。可以直接重试这一步。",
+            isError: false, image: nil)
         }
+        // Let the scene transition finish before capturing; the old code waited
+        // for the *caller* to end up in the background, which never happens when
+        // DSH Go itself is the app that just launched something.
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        try require(live)
         let reply = try await capture(execution, current: live)
         let output = try await observe(reply, execution, image: false, detail: false, current: live)
         lastOpenedApplication = application
-        return IOSPhoneOutcome(text: "启动请求已派发（pid=\(opened.metadata.pid ?? 0)，前台 App 未核实）。\n" + output.text,
+        return IOSPhoneOutcome(text: "启动请求已派发（pid=\(pid)），系统已接受前台激活。\n" + output.text,
           isError: false, image: nil)
       }
       guard await consent.waitForTarget(request, current: live) else {
@@ -169,7 +191,7 @@ final class IOSPhoneCoreActions {
       }
       guard let token else { throw IOSPhoneScreenError.stale }
       let checked = try await screen.revalidate(screen: token, binding: binding, fresh: fresh,
-        requiresTextInput: plan.method == .type, target: point, current: live)
+        requiresTextInput: plan.method == .type, target: point, targetText: targetText, current: live)
       latestToken = nil
       try requireBackground(live)
       switch plan.method {
