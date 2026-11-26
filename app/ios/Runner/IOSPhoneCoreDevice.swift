@@ -245,7 +245,12 @@ final class IOSPhoneCoreDevice: NSObject {
     guard run.pending == nil, run.nextRequest < UInt64.max else { return .failure(.init(code: "ERR_PHONE_BUSY")) }
     guard let bytes = try? JSONSerialization.data(withJSONObject: values), bytes.count <= 16_384,
       let operation = values["op"] as? String else { return .failure(.init(code: "ERR_PHONE_ARGUMENTS")) }
-    let pending = Request(id: run.nextRequest, mutating: !["screenshot", "apps"].contains(operation))
+    // P5: only operations with a lasting side effect are unsafe to retry.
+    // Launching an app is idempotent, and screenshot/apps/prepareInput change
+    // nothing, so treating them as mutating turned a retryable timeout into a
+    // dead end ("结果不明，不要重试").
+    let mutating = ["tap", "swipe", "key", "paste", "ascii"].contains(operation)
+    let pending = Request(id: run.nextRequest, mutating: mutating)
     run.nextRequest += 1
     run.pending = pending
     let accepted = native.request(run.handle, pending.id, bytes) { [weak self, weak run] handle, id, status, text, data in
@@ -262,10 +267,14 @@ final class IOSPhoneCoreDevice: NSObject {
         !run.terminal, !run.faulted, run.pairingGeneration == pairing.generation,
         now() < deadline else {
         native.cancel(run.handle, pending.id)
-        stop(run)
-        // Dispatch may already have happened. The late result and terminal
-        // callback still own cleanup, but this caller never retries/falls back.
-        return .failure(.init(code: "ERR_PHONE_ACTION_UNCONFIRMED", mayHaveActed: pending.mutating))
+        // P1: a single request timing out must not tear the tunnel down. The
+        // run stays ready, the media stream stays up, and the next request can
+        // proceed. Only this one native request is dropped; its late result is
+        // ignored because `pending` no longer belongs to the run.
+        if run.pending === pending { run.pending = nil }
+        // Dispatch may already have happened. The caller must not retry a
+        // mutating op on its own; an idempotent one may simply be re-issued.
+        return .failure(.init(code: "ERR_PHONE_REQUEST_TIMEOUT", mayHaveActed: pending.mutating))
       }
       // Cancellation, revocation and an inline native callback can all occur
       // before request() returns. A stored result is not authority to report a
