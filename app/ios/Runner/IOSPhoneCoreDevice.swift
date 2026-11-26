@@ -283,9 +283,10 @@ final class IOSPhoneCoreDevice: NSObject {
         // Cancellation, revocation, a pairing change and an explicit stop are
         // different: those keep their existing cleanup, because the run really
         // is no longer usable in that state.
-        if now() >= deadline {
+        if reason.hasPrefix("deadline_") {
           if run.pending === pending { run.pending = nil }
-          return .failure(.init(code: "ERR_PHONE_REQUEST_TIMEOUT", mayHaveActed: pending.mutating))
+          return .failure(.init(code: "ERR_PHONE_REQUEST_TIMEOUT", reason: "\(operation):\(reason)",
+            mayHaveActed: pending.mutating))
         }
         stop(run)
         // Dispatch may already have happened. The late result and terminal
