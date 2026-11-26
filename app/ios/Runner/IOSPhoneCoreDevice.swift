@@ -267,14 +267,19 @@ final class IOSPhoneCoreDevice: NSObject {
         !run.terminal, !run.faulted, run.pairingGeneration == pairing.generation,
         now() < deadline else {
         native.cancel(run.handle, pending.id)
-        // P1: a single request timing out must not tear the tunnel down. The
-        // run stays ready, the media stream stays up, and the next request can
-        // proceed. Only this one native request is dropped; its late result is
-        // ignored because `pending` no longer belongs to the run.
-        if run.pending === pending { run.pending = nil }
-        // Dispatch may already have happened. The caller must not retry a
-        // mutating op on its own; an idempotent one may simply be re-issued.
-        return .failure(.init(code: "ERR_PHONE_REQUEST_TIMEOUT", mayHaveActed: pending.mutating))
+        // P1: a request that ran out of time must not tear the tunnel down. The
+        // run keeps its tunnel and media stream, so the next request proceeds.
+        // Cancellation, revocation, a pairing change and an explicit stop are
+        // different: those keep their existing cleanup, because the run really
+        // is no longer usable in that state.
+        if now() >= deadline {
+          if run.pending === pending { run.pending = nil }
+          return .failure(.init(code: "ERR_PHONE_REQUEST_TIMEOUT", mayHaveActed: pending.mutating))
+        }
+        stop(run)
+        // Dispatch may already have happened. The late result and terminal
+        // callback still own cleanup, but this caller never retries/falls back.
+        return .failure(.init(code: "ERR_PHONE_ACTION_UNCONFIRMED", mayHaveActed: pending.mutating))
       }
       // Cancellation, revocation and an inline native callback can all occur
       // before request() returns. A stored result is not authority to report a
