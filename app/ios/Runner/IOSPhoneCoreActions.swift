@@ -133,7 +133,16 @@ final class IOSPhoneCoreActions {
 
       // Only a fresh screen/open consent establishes the media gate. A mutation
       // uses the already established gate; it never silently starts one.
-      if (plan.method == .screen || plan.method == .open), capabilities["touch"] == true {
+      // P6: only a screen read needs the media stream here. `open` launches an
+      // app and then takes one screenshot, and screenshots go through the
+      // screen-capture service, not the display stream.
+      //
+      // Arming prepareInput for `open` was the amplifier: media.rs:272 sets
+      // may_have_acted before the stream even starts (the daemon may replace a
+      // duplicate), and core_device.rs:610-617 retires the whole run as soon as
+      // an error is reported with acted == true. So one `open` timeout tore down
+      // the tunnel for the Rust side too, no matter what Swift kept.
+      if plan.method == .screen, capabilities["touch"] == true {
         _ = try await send(["op": "prepareInput"], execution, current: live)
       }
       if plan.method == .open, let application {
