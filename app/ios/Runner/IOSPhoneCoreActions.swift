@@ -388,13 +388,21 @@ final class IOSPhoneCoreActions {
     let reply = try await send(["op": "apps"], execution, current: current)
     guard reply.metadata.kind == "apps", let data = reply.bytes, data.count <= 1024 * 1024,
       let value = try? JSONDecoder().decode([String: [[String: String]]].self, from: data),
-      let apps = value["apps"], apps.count <= 4096,
-      apps.allSatisfy({ item in
-        guard let name = item["name"], !name.isEmpty, name.utf8.count <= 512,
-          let id = item["id"], id.utf8.count <= 255 else { return false }
-        return PhoneRunnerAppCatalog.bundleID(for: id) == id
-      }) else { throw IOSPhoneCoreFailure(code: "ERR_PHONE_CORE_PROTOCOL") }
-    return apps
+      let apps = value["apps"], apps.count <= 4096 else {
+      throw IOSPhoneCoreFailure(code: "ERR_PHONE_CORE_PROTOCOL")
+    }
+    // The catalog is a name-resolution aid, not an allowlist. A real device
+    // answers with every installed app, and the previous
+    // `allSatisfy(PhoneRunnerAppCatalog.bundleID == id)` demanded that each one
+    // be a known system bundle — one unknown third-party app made the whole list
+    // unparseable (ERR_PHONE_CORE_PROTOCOL), which is why `apps` never worked.
+    // Only structurally unusable entries are dropped now.
+    let usable = apps.filter { item in
+      guard let name = item["name"], !name.isEmpty, name.utf8.count <= 512,
+        let id = item["id"], !id.isEmpty, id.utf8.count <= 255 else { return false }
+      return true
+    }
+    return usable
   }
 
   private func observe(_ reply: IOSPhoneCoreReply, _ execution: Execution, image: Bool, detail: Bool,
