@@ -85,7 +85,11 @@ struct IOSPhoneOperation {
 
   var needsTarget: Bool { ![.apps, .open].contains(method) }
   var requiresObservation: Bool { ![.apps, .open, .screen].contains(method) }
-  var wantsImage: Bool { parameters["image"] as? Bool == true }
+  /// A multimodal caller should be given the frame, not just our local OCR text.
+  /// Vision only recovers strings, so icons, image buttons and layout are
+  /// invisible to it — precisely the parts a view-capable model reads well.
+  /// Callers can pass `image: false` on a follow-up read of a page they just saw.
+  var wantsImage: Bool { parameters["image"] as? Bool ?? true }
   var detail: Bool { parameters["detail"] as? Bool == true }
   var screen: String? { (parameters["screen"] ?? parameters["observation"]) as? String }
   var text: String? { parameters["text"] as? String }
