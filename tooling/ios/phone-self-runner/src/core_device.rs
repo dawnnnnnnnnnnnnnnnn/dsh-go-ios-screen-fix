@@ -760,7 +760,12 @@ impl Session {
             Input::Launch { bundle_id } => {
                 self.frame = None;
                 let mut client = AppServiceClient::connect_rsd(&mut self.tunnel.adapter, &mut self.tunnel.handshake).await.map_err(|_| SERVICE)?;
-                acted.store(true, Ordering::Release);
+                // Launching is idempotent: asking twice for the same bundle has
+                // no additional effect. Marking it as "may have acted" made a
+                // failed launch set `acted`, and the error path retires the whole
+                // run when that flag is set (see the Err arm below) — so one
+                // unsuccessful `open` destroyed the tunnel for every later call.
+                // Media start still arms the flag (media.rs:272); launch does not.
                 let result = client.launch_application(bundle_id.as_str(), &[], false, false, None, None, None).await.map_err(|_| SERVICE)?;
                 if result.pid == 0 { return Err(PROTOCOL); }
                 let mut payload = Payload::dispatched();
