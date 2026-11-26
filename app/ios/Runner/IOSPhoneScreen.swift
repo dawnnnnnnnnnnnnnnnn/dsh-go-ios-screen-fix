@@ -176,7 +176,10 @@ final class IOSPhoneScreen {
     let ticket = operation
     let captured = now()
     try check(binding: binding, current: current)
-    let value = try await analyze(reply, withText: true, preview: image ? .required : .bestEffort)
+    // The annotated frame is an enhancement, never a precondition. Rendering it
+    // can fail (size limits, memory); when it does, the element list and the
+    // text must still come back, because every action depends on those.
+    let value = try await analyze(reply, withText: true, preview: .bestEffort)
     try check(ticket: ticket, binding: binding, current: current)
     guard validAge(since: captured, maximum: Self.observationLifetime), serial < UInt64.max else {
       throw IOSPhoneScreenError.stale
@@ -366,7 +369,7 @@ final class IOSPhoneScreen {
               do {
                 let rendered = try Self.annotatedJPEG(image, size: size, elements: elements)
                 data = rendered.data; size = rendered.size
-              } catch IOSPhoneScreenError.limit where preview == .bestEffort {
+              } catch where preview == .bestEffort {
                 // A text-only model request may still be approved from its textual target.
                 // Absence of a local preview never relaxes pixel revalidation.
                 data = nil
