@@ -137,14 +137,28 @@ final class IOSPhoneCoreActions {
           (byte >= 0x61 && byte <= 0x7a) || (byte >= 0x41 && byte <= 0x5a)
             || (byte >= 0x30 && byte <= 0x39) || byte == 0x2e || byte == 0x2d
         }
+        var listed: [[String: String]] = []
         if looksLikeBundle { application = wanted }
         else if let identifier = PhoneRunnerAppCatalog.bundleID(for: wanted) { application = identifier }
         else {
-          let apps = try await applications(execution, current: live)
-          application = PhoneRunnerAppCatalog.bundleID(for: wanted, apps: apps)
+          listed = try await applications(execution, current: live)
+          application = PhoneRunnerAppCatalog.bundleID(for: wanted, apps: listed)
         }
         guard let application else {
-          throw IOSPhoneOperationError(message: "未找到这个应用名称，请用 apps 查询准确包名；这一步没有打开应用。")
+          // One failed guess must not cost another round trip. Report what the
+          // device actually calls its apps so the caller can pick a bundle id
+          // immediately instead of guessing names.
+          let needle = wanted.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+          let near = listed.filter { ($0["name"] ?? "").lowercased().contains(needle) }
+          let pool = near.isEmpty ? Array(listed.prefix(40)) : Array(near.prefix(20))
+          let sample = pool.compactMap { item -> String? in
+            guard let name = item["name"], let id = item["id"] else { return nil }
+            return "\(name) = \(id)"
+          }.joined(separator: "\n")
+          let hint = sample.isEmpty
+            ? "读不到应用列表，请直接给出包名（例如 com.tencent.mqq）。"
+            : "名称必须完全一致。以下为本机应用（名称 = 包名）：\n\(sample)\n请直接用包名重试。"
+          throw IOSPhoneOperationError(message: "未找到「\(wanted)」。\(hint)")
         }
         if IOSPhoneLink.shared.appRoutes[application] == "xctest" {
           throw IOSPhoneOperationError(message: "这个应用设置为 XCTest 增强。名称已解析为 \(application)；请按该包名重新发起并确认，本次没有启动应用。")
