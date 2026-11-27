@@ -820,7 +820,16 @@ final class IOSPhoneScreen {
     if found >= 2 { return true }
     let labels = bottom.map(\.0)
     let controls = ["空格", "换行", "換行", "发送", "發送", "完成", "space", "return", "done", "123"]
-    return found == 1 && controls.filter { control in labels.contains(where: { $0 == control }) }.count >= 2
+    let controlCount = controls.filter { control in labels.contains(where: { $0 == control }) }.count
+    // Latin keyboard: a letter row plus its control keys.
+    if found >= 1 && controlCount >= 2 { return true }
+    // CJK input methods have no qwertyuiop row at all — 拼音九宫格 shows digits, and a
+    // Chinese full keyboard rarely OCRs as one continuous latin row. The control
+    // keys and the density of the bottom strip are what is actually there. This
+    // is why a visible keyboard was reported as missing and typing gave up.
+    if controlCount >= 2 { return true }
+    if labels.count >= 12 { return true }
+    return false
   }
 
   nonisolated private static func outputSize(width: Int, height: Int) -> (width: Int, height: Int) {
