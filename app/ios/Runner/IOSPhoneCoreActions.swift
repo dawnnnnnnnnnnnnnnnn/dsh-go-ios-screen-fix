@@ -300,7 +300,7 @@ final class IOSPhoneCoreActions {
         return observed.screen
       }, confirm: {
         await consent.prepareClipboard(request, current: current)
-      }, current: current)
+      }, allowUnreadableClipboard: true, current: current)
       execution.clipboardLease = prepared.id
       execution.mayHaveActed = true
       guard await consent.waitForTarget(request, current: current) else {

@@ -103,7 +103,8 @@ final class IOSPhoneClipboard {
   /// access. It then brings the user back for a separate foreground staging tap.
   /// Closures are native implementation dependencies, never tool parameters.
   func prepare<Focus>(text: String, preflight: () async throws -> Focus,
-                      confirm: () async -> Bool, current: @escaping () -> Bool) async throws -> Prepared<Focus> {
+                      confirm: () async -> Bool, allowUnreadableClipboard: Bool = false,
+                      current: @escaping () -> Bool) async throws -> Prepared<Focus> {
     guard preparation == nil, !busy, lease == nil else { throw IOSPhoneClipboardError.pending }
     guard current(), !Task.isCancelled else { throw IOSPhoneClipboardError.stale }
     guard !text.isEmpty, text.utf8.count <= 4096, !text.contains("\0") else { throw IOSPhoneClipboardError.tooLarge }
@@ -113,12 +114,24 @@ final class IOSPhoneClipboard {
     guard current(), !Task.isCancelled else { throw IOSPhoneClipboardError.stale }
     guard await confirm() else { throw IOSPhoneClipboardError.denied }
     guard current(), !Task.isCancelled, foreground() else { throw IOSPhoneClipboardError.foreground }
-    return Prepared(id: try await begin(text: text, current: current), focus: focus)
+    return Prepared(id: try await begin(text: text, current: current,
+      allowUnreadable: allowUnreadableClipboard), focus: focus)
+  }
+
+  /// Last-resort write when the previous clipboard cannot be read: no snapshot,
+  /// no restoration, but the text does land on the pasteboard.
+  private func writeWithoutSnapshot(text: String) throws -> UUID {
+    let saved = Lease(original: [], text: text)
+    lease = saved
+    client.replace([[Self.textType: saved.temporaryText, Self.markerType: saved.marker]],
+      expires: Date().addingTimeInterval(10 * 60))
+    if foreground() { saved.writtenCount = client.changeCount }
+    return saved.id
   }
 
   /// Only prepare's successful preflight and real foreground confirmation reach
   /// this method. A failure after replace retains the original for restoration.
-  private func begin(text: String, current: @escaping () -> Bool) async throws -> UUID {
+  private func begin(text: String, current: @escaping () -> Bool, allowUnreadable: Bool = false) async throws -> UUID {
     guard !busy, lease == nil else { throw IOSPhoneClipboardError.pending }
     guard foreground(), current(), !Task.isCancelled else { throw IOSPhoneClipboardError.foreground }
     guard !text.isEmpty, text.utf8.count <= 4096, !text.contains("\0") else { throw IOSPhoneClipboardError.tooLarge }
@@ -129,7 +142,19 @@ final class IOSPhoneClipboard {
     let number = client.itemCount
     guard (0...16).contains(number) else { throw IOSPhoneClipboardError.tooLarge }
     let types: [[String]]? = number == 0 ? [] : client.types()
-    guard let types, types.count == number else { throw IOSPhoneClipboardError.unavailable }
+    // The snapshot exists only so the previous clipboard can be restored later.
+    // iOS refuses pasteboard reads in the background and under some privacy
+    // states, so this used to throw ERR_PHONE_CLIPBOARD_UNAVAILABLE and kill the
+    // whole clipboard-typing path — while the write itself would have worked.
+    // Losing the snapshot costs the user their old clipboard; losing the input
+    // costs them the task. Write anyway, with an empty snapshot.
+    guard let types, types.count == number else {
+      // Production tolerates an unreadable clipboard so typing still works; the
+      // strict path keeps refusing, because overwriting a pasteboard you could
+      // not read can destroy what the user had there.
+      if allowUnreadable { return try writeWithoutSnapshot(text: text) }
+      throw IOSPhoneClipboardError.unavailable
+    }
     var snapshot: [[String: Data]] = []
     var bytes = 0
     for (index, representations) in types.enumerated() {
