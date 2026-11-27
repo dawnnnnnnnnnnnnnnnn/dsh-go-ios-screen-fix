@@ -800,7 +800,10 @@ final class IOSPhoneScreen {
 
   nonisolated static func keyboardHint(_ texts: [Text]) -> Bool {
     let bottom = texts.compactMap { text -> (String, CGRect)? in
-      guard text.confidence.isFinite, text.confidence >= 0.3,
+      // Key caps are small, low-contrast and often icons with one glyph; Vision
+      // reports them with low confidence, so a 0.3 floor threw the whole keyboard
+      // away and the strip looked empty. 0.1 still excludes noise.
+      guard text.confidence.isFinite, text.confidence >= 0.1,
         let box = topLeft(text.bounds), box.midY >= 0.5 else { return nil }
       return (plain(text.text).lowercased(), box)
     }

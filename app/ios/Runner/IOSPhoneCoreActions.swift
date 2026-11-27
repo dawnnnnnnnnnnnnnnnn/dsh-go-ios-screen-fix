@@ -319,9 +319,10 @@ final class IOSPhoneCoreActions {
       // No sensitive veto: the screen-wide word list and dot heuristic refused
       // ordinary typing (even 你好) before anything was dispatched. The
       // confirmation card is the guard that shows the exact text.
-      guard evidence.keyboardHint else {
-        throw IOSPhoneOperationError(message: "返回后没有核实到原键盘线索；没有派发粘贴，请用 handoff。")
-      }
+      //
+      // The keyboard hint is advisory here too. A paste goes to the focused
+      // field; it does not need a recognised key cap, and a third-party CJK
+      // keyboard on screen is exactly the case OCR fails on.
       try requireBackground(current)
       try clipboard.validateForPaste(prepared.id, current: current)
       _ = try await send(["op": "paste", "replace": true, "nativeFrameId": checked.nativeFrameID], execution, current: current)
@@ -391,9 +392,11 @@ final class IOSPhoneCoreActions {
       focused = try await capture(execution, current: current)
       evidence = try await screen.inspectInput(reply: focused, binding: execution.binding, current: current)
     }
-    guard evidence.keyboardHint else {
-      throw IOSPhoneOperationError(message: "点击后未识别到键盘线索，不能确认可输入；请用 handoff。")
-    }
+    // The keyboard hint is advisory. A visible keyboard that OCR cannot read — a
+    // third-party CJK input method, a PiP overlay covering the strip, a keyboard
+    // drawn entirely from glyphs — must not stop input: the paste and the key
+    // events only need focus, not a recognised key cap. We waited, did not see
+    // one, and continue; the frame check below is the real gate.
     guard let frameID = focused.metadata.nativeFrameId,
       focused.metadata.interfaceOrientation == frame.orientation else { throw IOSPhoneScreenError.orientation }
     return InputFocus(reply: focused, evidence: evidence, nativeFrameID: frameID)
