@@ -128,7 +128,15 @@ final class IOSPhoneCoreActions {
       var application: String?
       if plan.method == .open {
         let wanted = plan.parameters["app"] as! String
-        if let identifier = PhoneRunnerAppCatalog.bundleID(for: wanted) { application = identifier }
+        // A value that already looks like a bundle identifier needs neither the
+        // built-in catalog nor an app list: use it as given. This is the only
+        // path to a third-party app when `apps` cannot answer.
+        let looksLikeBundle = wanted.contains(".") && wanted.utf8.allSatisfy { byte in
+          (byte >= 0x61 && byte <= 0x7a) || (byte >= 0x41 && byte <= 0x5a)
+            || (byte >= 0x30 && byte <= 0x39) || byte == 0x2e || byte == 0x2d
+        }
+        if looksLikeBundle { application = wanted }
+        else if let identifier = PhoneRunnerAppCatalog.bundleID(for: wanted) { application = identifier }
         else {
           let apps = try await applications(execution, current: live)
           application = PhoneRunnerAppCatalog.bundleID(for: wanted, apps: apps)
