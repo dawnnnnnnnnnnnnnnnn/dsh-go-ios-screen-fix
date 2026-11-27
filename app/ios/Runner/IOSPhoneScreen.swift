@@ -689,23 +689,6 @@ final class IOSPhoneScreen {
     return result
   }
 
-  /// Everything recognised inside a generous box around a point. Used to keep the
-  /// sensitive-word scan local to the field being written into instead of the
-  /// whole screen.
-  nonisolated private static func textsNear(_ texts: [Text], point: CGPoint,
-                                            width: Int, height: Int) -> [Text] {
-    guard width > 0, height > 0 else { return texts }
-    let x = point.x * CGFloat(width), y = point.y * CGFloat(height)
-    let radius = max(64, min(CGFloat(width), CGFloat(height)) / 4)
-    let box = CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)
-    return texts.filter { item in
-      guard item.confidence.isFinite, let raw = topLeft(item.bounds) else { return false }
-      let scaled = CGRect(x: raw.minX * CGFloat(width), y: raw.minY * CGFloat(height),
-        width: raw.width * CGFloat(width), height: raw.height * CGFloat(height))
-      return scaled.intersects(box)
-    }
-  }
-
   nonisolated static func sensitiveText(_ texts: [Text]) -> Bool {
     let phrases = ["密码", "口令", "验证码", "校验码", "驗證碼", "密碼", "支付", "付款", "银行卡", "銀行卡", "卡号", "卡號", "信用卡",
       "安全码", "安全碼", "自动填充", "自動填寫", "自動填充", "钥匙串", "鑰匙圈", "password", "passcode", "passkey",

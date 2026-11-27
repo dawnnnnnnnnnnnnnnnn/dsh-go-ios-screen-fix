@@ -206,7 +206,7 @@ final class IOSPhoneCoreActions {
       guard let token else { throw IOSPhoneScreenError.stale }
       let checked = try await screen.revalidate(screen: token, binding: binding, fresh: fresh,
         requiresTextInput: plan.method == .type, target: point, targetText: targetText,
-        allowRelocation: plan.method == .scroll, current: live)
+        allowRelocation: plan.method == .scroll || plan.method == .collect, current: live)
       latestToken = nil
       try requireBackground(live)
       switch plan.method {
