@@ -282,18 +282,21 @@ final class IOSPhoneScreen {
     }
     guard value.orientation == observation.orientation else { throw IOSPhoneScreenError.orientation }
     guard value.width == observation.width, value.height == observation.height else { throw IOSPhoneScreenError.changed }
-    if requiresTextInput {
-      // The word list has to stay local to the field being written into. Scanning
-      // the whole screen refused every keystroke on any page that merely mentions
-      // 密码/支付/验证码 somewhere (a "忘记密码" link, a "支付方式" row), and it
-      // also caught the candidate bar of the keyboard itself.
-      let nearby = target.map {
-        Self.textsNear(value.texts, point: $0, width: value.width, height: value.height)
-      } ?? value.texts
-      if value.maskDots || Self.sensitiveText(nearby) {
-        throw IOSPhoneScreenError.sensitive
-      }
-    }
+    // No sensitive-input veto here any more.
+    //
+    // Both halves of the old check refused ordinary typing on ordinary pages:
+    // the word list matched anything on screen that mentioned 密码/支付/验证码
+    // (a "忘记密码" link, a "支付方式" row, the keyboard candidate bar), and the
+    // masked-dots heuristic is screen-wide, so bulleted lists and decorative
+    // dots were read as a password field. Even 你好 came back as
+    // ERR_PHONE_SENSITIVE_INPUT, which means the gate was refusing before
+    // anything was dispatched.
+    //
+    // The remaining guard is the human one: every input is approved in the
+    // confirmation card, where the exact text is shown before it is written, and
+    // the task itself was authorised in the foreground. The `sensitive` flag is
+    // still computed on the observation and reported to the model, so it can
+    // choose to hand off instead.
     guard value.matchesReference == true else { throw IOSPhoneScreenError.changed }
     try check(ticket: ticket, binding: binding, current: current)
     guard validAge(since: received, maximum: 30) else { throw IOSPhoneScreenError.stale }

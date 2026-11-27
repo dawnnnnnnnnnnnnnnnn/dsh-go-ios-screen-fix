@@ -288,7 +288,9 @@ final class IOSPhoneCoreActions {
       let checked = try await screen.revalidate(screen: prepared.focus, binding: execution.binding,
         fresh: returned, requiresTextInput: true, target: point, current: current)
       let evidence = try await screen.inspectInput(reply: returned, binding: execution.binding, current: current)
-      guard !evidence.sensitive else { throw IOSPhoneScreenError.sensitive }
+      // No sensitive veto: the screen-wide word list and dot heuristic refused
+      // ordinary typing (even 你好) before anything was dispatched. The
+      // confirmation card is the guard that shows the exact text.
       guard evidence.keyboardHint else {
         throw IOSPhoneOperationError(message: "返回后没有核实到原键盘线索；没有派发粘贴，请用 handoff。")
       }
@@ -311,7 +313,7 @@ final class IOSPhoneCoreActions {
     _ = try await send(["op": "ascii", "replace": true, "text": plan.text!, "nativeFrameId": focus.nativeFrameID], execution, current: current)
     var after = try await capture(execution, current: current)
     var readback = try await screen.inspectInput(reply: after, binding: execution.binding, current: current)
-    guard !readback.sensitive else { throw IOSPhoneScreenError.sensitive }
+    // No sensitive veto here either; the text has already been approved and sent.
     // OCR readback is an explicitly labelled heuristic, never a HID ACK. Text
     // already visible before typing cannot establish that this input appeared.
     let text = plan.text!
@@ -321,7 +323,6 @@ final class IOSPhoneCoreActions {
       try await Task.sleep(nanoseconds: 150_000_000)
       after = try await capture(execution, current: current)
       readback = try await screen.inspectInput(reply: after, binding: execution.binding, current: current)
-      guard !readback.sensitive else { throw IOSPhoneScreenError.sensitive }
     }
     let observedNewText = !evidence.recognizedText.contains(text) && readback.recognizedText.contains(text)
     var prefix = "输入已派发；OCR " + (observedNewText ? "看到了此前没有的完整输入文字，但这不是应用消费确认。" : "不能确认完整输入结果，请核对，不要自动重试。")
@@ -356,13 +357,12 @@ final class IOSPhoneCoreActions {
     var focused = try await capture(execution, current: current)
     var evidence = try await screen.inspectInput(reply: focused, binding: execution.binding, current: current)
     let settle = Date().addingTimeInterval(3)
-    while !evidence.keyboardHint, !evidence.sensitive, Date() < settle {
+    while !evidence.keyboardHint, Date() < settle {
       try requireBackground(current)
       try await Task.sleep(nanoseconds: 150_000_000)
       focused = try await capture(execution, current: current)
       evidence = try await screen.inspectInput(reply: focused, binding: execution.binding, current: current)
     }
-    guard !evidence.sensitive else { throw IOSPhoneScreenError.sensitive }
     guard evidence.keyboardHint else {
       throw IOSPhoneOperationError(message: "点击后未识别到键盘线索，不能确认可输入；请用 handoff。")
     }
