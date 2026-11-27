@@ -318,11 +318,15 @@ final class IOSPhoneScreen {
     // What still refuses is a frame whose dimensions changed: rotation or a
     // lifted keyboard invalidate the coordinates themselves, so the tap would
     // land somewhere else entirely.
-    // The strict contract still refuses newly-appeared sensitive text; production
-    // does not, because the word list and the dot heuristic are screen-wide and
-    // refused ordinary typing (even 你好) before anything was dispatched. The
-    // confirmation card remains the guard that shows the exact text.
-    if requiresTextInput, strict, value.maskDots || Self.sensitiveText(value.texts) {
+    // The strict contract still refuses when the approved observation was
+    // sensitive, or when this frame turns sensitive. `observation.sensitive`
+    // matters: a fresh frame whose OCR misses the strings must not clear a
+    // sensitive approval. Production skips all of it — the word list and the dot
+    // heuristic are screen-wide and refused ordinary typing (even 你好) before
+    // anything was dispatched; the confirmation card is the guard that shows the
+    // exact text.
+    if requiresTextInput, strict,
+      observation.sensitive || value.maskDots || Self.sensitiveText(value.texts) {
       throw IOSPhoneScreenError.sensitive
     }
     // The comparison is a RESULT, not a gate. `strict` exists only for the
