@@ -253,8 +253,19 @@ final class IOSPhoneScreen {
 
   func imagePoint(screen: String, x: Double, y: Double, binding: Binding) throws -> CGPoint {
     let observation = try require(screen: screen, binding: binding)
-    guard observation.imageIncluded, x.isFinite, y.isFinite, x >= 0, y >= 0,
-      x < Double(observation.imageWidth), y < Double(observation.imageHeight) else { throw IOSPhoneScreenError.invalid }
+    guard observation.imageIncluded, x.isFinite, y.isFinite, x >= 0, y >= 0 else {
+      throw IOSPhoneScreenError.invalid
+    }
+    // Two coordinate spaces are accepted, because a caller looking at the frame
+    // cannot always tell which one it is measuring in. Values within 0…1 are
+    // normalised; anything larger is a pixel on the frame that was returned
+    // (`imageWidth` × `imageHeight`). Before this, a caller that passed
+    // normalised numbers had them divided by the frame size a second time and the
+    // tap landed near the middle.
+    if x <= 1, y <= 1, x > 0, y > 0 { return CGPoint(x: x, y: y) }
+    guard x < Double(observation.imageWidth), y < Double(observation.imageHeight) else {
+      throw IOSPhoneScreenError.invalid
+    }
     return CGPoint(x: x / Double(observation.imageWidth), y: y / Double(observation.imageHeight))
   }
 
