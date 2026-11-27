@@ -1,3 +1,9 @@
+> **This is a modified version of DSH Go, not an official release.**
+> Original project: [ccch1mneyyy/dsh-go](https://github.com/ccch1mneyyy/dsh-go) by **ccch1mneyyy**, base revision `v1.4.0`.
+> It is not maintained by, endorsed by, or affiliated with the DSH Go project or its author.
+> Only the iOS phone-control path is changed - see [PATCHES.md](PATCHES.md) and [NOTICE.md](NOTICE.md).
+> Licence: AGPL-3.0, unchanged.
+
 <p align="center">
   <b>简体中文</b> · <a href="README.en.md">English</a>
 </p>
