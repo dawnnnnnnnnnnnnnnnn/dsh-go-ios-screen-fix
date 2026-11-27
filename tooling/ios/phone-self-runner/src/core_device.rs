@@ -883,7 +883,11 @@ impl Session {
     }
     async fn apps(&mut self) -> Result<Payload, Failure> {
         let mut client = AppServiceClient::connect_rsd(&mut self.tunnel.adapter, &mut self.tunnel.handshake).await.map_err(|_| SERVICE)?;
-        let apps = client.list_apps(false, true, false, false, true).await.map_err(|_| SERVICE)?;
+        // default_apps=false on purpose: enumerating every system app made this
+        // call take longer than the 35 s request budget, so `apps` never
+        // answered. System apps do not need to be listed — their names come from
+        // the built-in catalog — and user-installed apps are the removable ones.
+        let apps = client.list_apps(false, true, false, false, false).await.map_err(|_| SERVICE)?;
         let bytes = application_catalog(apps.into_iter().map(|app| (app.name, app.bundle_identifier)))?;
         Ok(Payload::read("apps", "application/json", bytes))
     }
