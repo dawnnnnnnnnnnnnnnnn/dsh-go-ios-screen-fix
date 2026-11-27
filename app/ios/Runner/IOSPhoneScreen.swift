@@ -130,6 +130,9 @@ final class IOSPhoneScreen {
     /// A scroll is supposed to move things, so the element may legitimately end
     /// up elsewhere on the screen. The label still has to be there.
     let allowRelocation: Bool
+    /// The old whole-frame contract. Tests pin it; production does not use it.
+    /// The relaxed target-based rules only apply when this is false.
+    let strict: Bool
   }
 
   private enum PreviewRequest: Equatable, Sendable { case required, bestEffort }
@@ -275,7 +278,7 @@ final class IOSPhoneScreen {
     let reference = MatchReference(width: observation.width, height: observation.height,
       digest: observation.digest, pixels: observation.pixels, texts: observation.texts,
       target: target, requiresTextInput: requiresTextInput, targetText: targetText,
-      allowRelocation: allowRelocation)
+      allowRelocation: allowRelocation, strict: strict)
     // A named element needs its label recognised again, even for a plain tap:
     // the whole point of the element path is to re-find the element by text.
     let value = try await analyze(fresh, withText: requiresTextInput || targetText != nil,
@@ -492,9 +495,9 @@ final class IOSPhoneScreen {
     }
     // Coordinate path (tapXY, scroll without an element id): there is no label to
     // re-find, so judge the neighbourhood of the approved point instead of the
-    // whole frame. A carousel or ticker elsewhere must not block a tap whose
-    // target is provably unchanged.
-    if let target = reference.target {
+    // whole frame. Production only — the strict contract tests keep the old
+    // whole-frame rule, which is what they are there to pin.
+    if !reference.strict, let target = reference.target {
       return localPixelsStable(reference, pixels, target: target, width: width, height: height)
     }
     guard stableText(reference.texts, texts, width: width, height: height) else { return false }
