@@ -246,7 +246,7 @@ final class IOSPhoneCoreActions {
         _ = try await send(values, execution, current: live)
       case .type:
         return try await type(plan, point: point!, frame: checked, request: request,
-          consent: consent, execution: execution, current: live)
+          consent: consent, targetText: targetText, execution: execution, current: live)
       case .collect:
         return try await collect(plan, first: fresh, anchor: point, execution: execution, current: live)
       default: throw IOSPhoneScreenError.invalid
@@ -272,7 +272,7 @@ final class IOSPhoneCoreActions {
   }
 
   private func type(_ plan: IOSPhoneOperation, point: CGPoint, frame: IOSPhoneScreen.FreshFrame,
-                    request: IOSPhoneRequest, consent: IOSPhoneTaskConsent,
+                    request: IOSPhoneRequest, consent: IOSPhoneTaskConsent, targetText: String?,
                     execution: Execution, current: @escaping () -> Bool) async throws -> IOSPhoneOutcome {
     let clipboard = IOSPhoneClipboard.shared
     defer {
@@ -300,7 +300,7 @@ final class IOSPhoneCoreActions {
       try requireBackground(current)
       let returned = try await capture(execution, current: current)
       let checked = try await screen.revalidate(screen: prepared.focus, binding: execution.binding,
-        fresh: returned, requiresTextInput: true, target: point, current: current)
+        fresh: returned, requiresTextInput: true, target: point, targetText: targetText, current: current)
       let evidence = try await screen.inspectInput(reply: returned, binding: execution.binding, current: current)
       // No sensitive veto: the screen-wide word list and dot heuristic refused
       // ordinary typing (even 你好) before anything was dispatched. The
