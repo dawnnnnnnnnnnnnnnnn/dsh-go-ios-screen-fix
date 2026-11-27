@@ -463,6 +463,13 @@ final class IOSPhoneScreen {
       return targetStillThere(texts, targetText: targetText, target: target,
         width: width, height: height, allowRelocation: reference.allowRelocation)
     }
+    // Coordinate path (tapXY, scroll without an element id): there is no label to
+    // re-find, so judge the neighbourhood of the approved point instead of the
+    // whole frame. A carousel or ticker elsewhere must not block a tap whose
+    // target is provably unchanged.
+    if let target = reference.target {
+      return localPixelsStable(reference, pixels, target: target, width: width, height: height)
+    }
     guard stableText(reference.texts, texts, width: width, height: height) else { return false }
     let oldKeyboard = keyboardHint(reference.texts)
     let newKeyboard = keyboardHint(texts)
@@ -566,6 +573,36 @@ final class IOSPhoneScreen {
       guard carets <= 1 else { return false }
     }
     return true
+  }
+
+  /// Coordinate-path revalidation: only the box around the approved point has to
+  /// be stable. Everything outside it is free to animate, which is the normal
+  /// state of any real page.
+  nonisolated private static func localPixelsStable(_ reference: MatchReference, _ pixels: Data,
+                                                    target: CGPoint, width: Int, height: Int) -> Bool {
+    let count = width * height
+    guard count >= 100_000, count <= PhoneScreenLimits.pixelCount,
+      pixels.count == count * 4, reference.pixels.count == pixels.count else { return false }
+    let cx = target.x * CGFloat(width), cy = target.y * CGFloat(height)
+    let radius = max(48, min(CGFloat(width), CGFloat(height)) / 6)
+    let x0 = max(0, Int(cx - radius)), x1 = min(width - 1, Int(cx + radius))
+    let y0 = max(0, Int(cy - radius)), y1 = min(height - 1, Int(cy + radius))
+    guard x1 > x0, y1 > y0 else { return false }
+    var changed = 0
+    for y in y0...y1 {
+      for x in x0...x1 {
+        let base = (y * width + x) * 4
+        if reference.pixels[base] != pixels[base]
+          || reference.pixels[base + 1] != pixels[base + 1]
+          || reference.pixels[base + 2] != pixels[base + 2] {
+          changed += 1
+        }
+      }
+    }
+    let area = (x1 - x0 + 1) * (y1 - y0 + 1)
+    // Allow a blinking caret or a pressed state inside the box, not a wholesale
+    // replacement of what is under the finger.
+    return changed <= max(64, area / 20)
   }
 
   /// Element-path revalidation: the named label must still be recognised, and
