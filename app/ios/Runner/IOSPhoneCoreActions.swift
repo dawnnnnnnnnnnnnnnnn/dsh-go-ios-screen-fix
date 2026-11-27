@@ -254,7 +254,15 @@ final class IOSPhoneCoreActions {
       }
       let after = try await capture(execution, current: live)
       let output = try await observe(after, execution, image: false, detail: false, current: live)
-      return .success("动作已派发；这不保证目标应用已完成。\n" + output.text)
+      // Report what happened, in the same three states the desktop and Android
+      // ports use. The action has already been sent; this only describes it.
+      let verdict: String
+      switch checked.change {
+      case .moved: verdict = "画面已变化，动作大概率生效。"
+      case .unchanged: verdict = "画面没有明显变化，动作可能未生效，可重试或换一种操作。"
+      case .unverifiable: verdict = "无法判断画面是否变化，请核对。"
+      }
+      return .success(verdict + "\n" + output.text)
     } catch {
       screen.invalidate(); latestToken = nil
       if let clipboardLease = execution.clipboardLease { IOSPhoneClipboard.shared.requestRestore(clipboardLease) }

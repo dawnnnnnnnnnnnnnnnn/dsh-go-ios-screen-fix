@@ -61,13 +61,15 @@ final class IOSPhoneScreen {
     let imageHeight: Int
   }
 
+  /// What the screen looked like when the action was approved, expressed as the
+  /// three states every other implementation reports: it moved, it did not, or
+  /// we could not tell. It is a result, never a precondition.
+  enum Change: Sendable { case moved, unchanged, unverifiable }
+
   struct FreshFrame: Sendable {
     let nativeFrameID: String
     let orientation: Int
-    /// The screen no longer matches the approved observation. The action still
-    /// runs and the caller may mention it — see the note in revalidate about why
-    /// this stopped being a veto.
-    var changed: Bool = false
+    var change: Change = .unverifiable
   }
 
   struct InputEvidence: Sendable {
@@ -313,13 +315,20 @@ final class IOSPhoneScreen {
     // What still refuses is a frame whose dimensions changed: rotation or a
     // lifted keyboard invalidate the coordinates themselves, so the tap would
     // land somewhere else entirely.
-    let screenChanged = value.matchesReference == false
-    if screenChanged, strict { throw IOSPhoneScreenError.changed }
+    // The comparison is a RESULT, not a gate. `strict` exists only for the
+    // contract tests that still pin the old refusal; production passes false.
+    let change: Change
+    switch value.matchesReference {
+    case .some(true): change = .unchanged
+    case .some(false): change = .moved
+    case .none: change = .unverifiable
+    }
+    if change == .moved, strict { throw IOSPhoneScreenError.changed }
     try check(ticket: ticket, binding: binding, current: current)
     guard validAge(since: received, maximum: 30) else { throw IOSPhoneScreenError.stale }
     // Rust independently checks and consumes its own <=30-second native frame.
     return FreshFrame(nativeFrameID: value.nativeFrameID, orientation: value.orientation,
-      changed: screenChanged)
+      change: change)
   }
 
   /// Pure local evidence after an approved focus tap. Absence of a hit is NOT
