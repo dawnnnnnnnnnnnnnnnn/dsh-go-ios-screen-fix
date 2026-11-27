@@ -121,6 +121,9 @@ final class IOSPhoneScreen {
     /// an element id rather than a raw coordinate. With it, revalidation asks
     /// "is that element still there" instead of "did the whole screen hold still".
     let targetText: String?
+    /// A scroll is supposed to move things, so the element may legitimately end
+    /// up elsewhere on the screen. The label still has to be there.
+    let allowRelocation: Bool
   }
 
   private enum PreviewRequest: Equatable, Sendable { case required, bestEffort }
@@ -252,6 +255,7 @@ final class IOSPhoneScreen {
   /// Never returns the old native frame as input authority.
   func revalidate(screen: String, binding: Binding, fresh: IOSPhoneCoreReply,
                   requiresTextInput: Bool, target: CGPoint? = nil, targetText: String? = nil,
+                  allowRelocation: Bool = false,
                   current: () -> Bool) async throws -> FreshFrame {
     let observation = try require(screen: screen, binding: binding)
     invalidate()
@@ -264,7 +268,8 @@ final class IOSPhoneScreen {
     }
     let reference = MatchReference(width: observation.width, height: observation.height,
       digest: observation.digest, pixels: observation.pixels, texts: observation.texts,
-      target: target, requiresTextInput: requiresTextInput, targetText: targetText)
+      target: target, requiresTextInput: requiresTextInput, targetText: targetText,
+      allowRelocation: allowRelocation)
     // A named element needs its label recognised again, even for a plain tap:
     // the whole point of the element path is to re-find the element by text.
     let value = try await analyze(fresh, withText: requiresTextInput || targetText != nil,
@@ -369,9 +374,11 @@ final class IOSPhoneScreen {
               do {
                 let rendered = try Self.annotatedJPEG(image, size: size, elements: elements)
                 data = rendered.data; size = rendered.size
-              } catch where preview == .bestEffort {
-                // A text-only model request may still be approved from its textual target.
-                // Absence of a local preview never relaxes pixel revalidation.
+              } catch {
+                // preview is always .bestEffort here, so no render failure may
+                // escape: a text-only model request may still be approved from
+                // its textual target, and absence of a local preview never
+                // relaxes pixel revalidation.
                 data = nil
               }
               annotation = Preview(elements: elements, data: data, width: size.width, height: size.height)
@@ -442,7 +449,7 @@ final class IOSPhoneScreen {
     // inside a search field sits exactly where the user wants to tap.
     if let targetText = reference.targetText, let target = reference.target {
       return targetStillThere(texts, targetText: targetText, target: target,
-        width: width, height: height)
+        width: width, height: height, allowRelocation: reference.allowRelocation)
     }
     guard stableText(reference.texts, texts, width: width, height: height) else { return false }
     let oldKeyboard = keyboardHint(reference.texts)
@@ -554,7 +561,8 @@ final class IOSPhoneScreen {
   /// free to animate. Absence of the label is a refusal, so a real page change
   /// still stops the tap.
   nonisolated private static func targetStillThere(_ texts: [Text], targetText: String,
-                                                   target: CGPoint, width: Int, height: Int) -> Bool {
+                                                   target: CGPoint, width: Int, height: Int,
+                                                   allowRelocation: Bool = false) -> Bool {
     let want = targetText.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !want.isEmpty else { return false }
     let x = target.x * CGFloat(width), y = target.y * CGFloat(height)
@@ -565,7 +573,9 @@ final class IOSPhoneScreen {
         let raw = topLeft(item.bounds) else { continue }
       let scaled = CGRect(x: raw.minX * CGFloat(width), y: raw.minY * CGFloat(height),
         width: raw.width * CGFloat(width), height: raw.height * CGFloat(height))
-      guard scaled.intersects(box) else { continue }
+      // A scroll is meant to move content: the label only has to still exist
+      // somewhere, not at the same place it was.
+      guard allowRelocation || scaled.intersects(box) else { continue }
       let seen = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
       // An empty recognition would make `want.contains(seen)` true and pass a
       // frame where the element is actually gone.

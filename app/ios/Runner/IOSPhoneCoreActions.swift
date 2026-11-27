@@ -106,7 +106,9 @@ final class IOSPhoneCoreActions {
             x: Double(plan.parameters["x"] as! Int), y: Double(plan.parameters["y"] as! Int), binding: binding)
         case .scroll, .collect:
           if let id = (plan.parameters["id"] ?? plan.parameters["list"]) as? Int {
-            point = try screen.elementPoint(screen: token, id: id, binding: binding)
+            let element = try screen.elementTarget(screen: token, id: id, binding: binding)
+            point = element.point
+            targetText = element.text
           }
         default: break
         }
@@ -203,7 +205,8 @@ final class IOSPhoneCoreActions {
       }
       guard let token else { throw IOSPhoneScreenError.stale }
       let checked = try await screen.revalidate(screen: token, binding: binding, fresh: fresh,
-        requiresTextInput: plan.method == .type, target: point, targetText: targetText, current: live)
+        requiresTextInput: plan.method == .type, target: point, targetText: targetText,
+        allowRelocation: plan.method == .scroll, current: live)
       latestToken = nil
       try requireBackground(live)
       switch plan.method {
