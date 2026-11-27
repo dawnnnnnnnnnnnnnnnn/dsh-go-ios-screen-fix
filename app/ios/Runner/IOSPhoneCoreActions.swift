@@ -220,7 +220,8 @@ final class IOSPhoneCoreActions {
       guard let token else { throw IOSPhoneScreenError.stale }
       let checked = try await screen.revalidate(screen: token, binding: binding, fresh: fresh,
         requiresTextInput: plan.method == .type, target: point, targetText: targetText,
-        allowRelocation: plan.method == .scroll || plan.method == .collect, current: live)
+        allowRelocation: plan.method == .scroll || plan.method == .collect,
+        strict: false, current: live)
       latestToken = nil
       try requireBackground(live)
       switch plan.method {
@@ -305,7 +306,7 @@ final class IOSPhoneCoreActions {
       // fail. Judging the neighbourhood of the point is the honest test — the
       // text changing inside the box is the intended result.
       let checked = try await screen.revalidate(screen: prepared.focus, binding: execution.binding,
-        fresh: returned, requiresTextInput: true, target: point, targetText: nil, current: current)
+        fresh: returned, requiresTextInput: true, target: point, targetText: nil, strict: false, current: current)
       let evidence = try await screen.inspectInput(reply: returned, binding: execution.binding, current: current)
       // No sensitive veto: the screen-wide word list and dot heuristic refused
       // ordinary typing (even 你好) before anything was dispatched. The

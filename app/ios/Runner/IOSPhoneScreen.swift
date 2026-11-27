@@ -64,6 +64,10 @@ final class IOSPhoneScreen {
   struct FreshFrame: Sendable {
     let nativeFrameID: String
     let orientation: Int
+    /// The screen no longer matches the approved observation. The action still
+    /// runs and the caller may mention it — see the note in revalidate about why
+    /// this stopped being a veto.
+    var changed: Bool = false
   }
 
   struct InputEvidence: Sendable {
@@ -255,7 +259,7 @@ final class IOSPhoneScreen {
   /// Never returns the old native frame as input authority.
   func revalidate(screen: String, binding: Binding, fresh: IOSPhoneCoreReply,
                   requiresTextInput: Bool, target: CGPoint? = nil, targetText: String? = nil,
-                  allowRelocation: Bool = false,
+                  allowRelocation: Bool = false, strict: Bool = true,
                   current: () -> Bool) async throws -> FreshFrame {
     let observation = try require(screen: screen, binding: binding)
     invalidate()
@@ -297,11 +301,25 @@ final class IOSPhoneScreen {
     // the task itself was authorised in the foreground. The `sensitive` flag is
     // still computed on the observation and reported to the model, so it can
     // choose to hand off instead.
-    guard value.matchesReference == true else { throw IOSPhoneScreenError.changed }
+    // A changed frame is no longer a veto.
+    //
+    // Every comparable implementation reports the change instead of refusing:
+    // the Android side returns ScreenVerdict.note (changed / unchanged /
+    // unverifiable) after the action, and the Windows computer-use plugins do
+    // "screenshot, act, poll ~1.6 s, report 生效/没变化/未判定". Only this iOS
+    // path turned the same information into a precondition, which on a live page
+    // refused nearly everything.
+    //
+    // What still refuses is a frame whose dimensions changed: rotation or a
+    // lifted keyboard invalidate the coordinates themselves, so the tap would
+    // land somewhere else entirely.
+    let screenChanged = value.matchesReference == false
+    if screenChanged, strict { throw IOSPhoneScreenError.changed }
     try check(ticket: ticket, binding: binding, current: current)
     guard validAge(since: received, maximum: 30) else { throw IOSPhoneScreenError.stale }
     // Rust independently checks and consumes its own <=30-second native frame.
-    return FreshFrame(nativeFrameID: value.nativeFrameID, orientation: value.orientation)
+    return FreshFrame(nativeFrameID: value.nativeFrameID, orientation: value.orientation,
+      changed: screenChanged)
   }
 
   /// Pure local evidence after an approved focus tap. Absence of a hit is NOT
