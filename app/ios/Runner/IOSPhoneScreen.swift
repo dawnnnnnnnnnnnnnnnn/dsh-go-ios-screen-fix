@@ -600,9 +600,10 @@ final class IOSPhoneScreen {
       }
     }
     let area = (x1 - x0 + 1) * (y1 - y0 + 1)
-    // Allow a blinking caret or a pressed state inside the box, not a wholesale
-    // replacement of what is under the finger.
-    return changed <= max(64, area / 20)
+    // A caret, a pressed state, and a ticker or rotating placeholder inside an
+    // input field all live inside this box — that is the normal content of the
+    // thing being tapped. Only a wholesale replacement of the box is refused.
+    return changed <= max(256, area / 4)
   }
 
   /// Element-path revalidation: the named label must still be recognised, and
