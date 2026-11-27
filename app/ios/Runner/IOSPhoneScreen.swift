@@ -846,6 +846,15 @@ final class IOSPhoneScreen {
     return false
   }
 
+  /// Grid spacing in frame pixels for the annotation overlay. Zero disables the
+  /// grid on frames too small for readable labels.
+  nonisolated private static func gridStep(for size: CGSize) -> Int {
+    let longest = max(size.width, size.height)
+    guard longest >= 300 else { return 0 }
+    if longest >= 1000 { return 100 }
+    return 50
+  }
+
   nonisolated private static func outputSize(width: Int, height: Int) -> (width: Int, height: Int) {
     let scale = min(1, 1280 / Double(max(width, height)))
     return (max(1, Int(Double(width) * scale)), max(1, Int(Double(height) * scale)))
@@ -880,6 +889,53 @@ final class IOSPhoneScreen {
             width: badgeSize.width, height: badgeSize.height)
           UIColor.systemBlue.setFill(); drawing.cgContext.fill(badge)
           label.draw(at: CGPoint(x: badge.minX + 3, y: badge.minY + 1), withAttributes: attributes)
+        }
+        // A coordinate grid the model can read instead of estimate.
+        //
+        // The frame is returned at up to 1280 px on its long edge but rendered in
+        // a chat bubble far smaller, so a model measuring key positions from the
+        // picture guesses in the wrong space and lands tens of pixels off — enough
+        // to miss an icon-only button such as the emoji key. With gridlines and
+        // edge labels the number can be read off instead of guessed.
+        let grid = Self.gridStep(for: bounds.size)
+        if grid > 0 {
+          let line = UIColor(white: 1, alpha: 0.22).cgColor
+          drawing.cgContext.setStrokeColor(line)
+          drawing.cgContext.setLineWidth(1)
+          var x = grid
+          while CGFloat(x) < bounds.width {
+            drawing.cgContext.move(to: CGPoint(x: CGFloat(x), y: 0))
+            drawing.cgContext.addLine(to: CGPoint(x: CGFloat(x), y: bounds.height))
+            x += grid
+          }
+          var y = grid
+          while CGFloat(y) < bounds.height {
+            drawing.cgContext.move(to: CGPoint(x: 0, y: CGFloat(y)))
+            drawing.cgContext.addLine(to: CGPoint(x: bounds.width, y: CGFloat(y)))
+            y += grid
+          }
+          drawing.cgContext.strokePath()
+          let tick: [NSAttributedString.Key: Any] = [
+            .font: UIFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold),
+            .foregroundColor: UIColor(white: 1, alpha: 0.75),
+          ]
+          drawing.cgContext.setFillColor(UIColor(white: 0, alpha: 0.45).cgColor)
+          x = grid
+          while CGFloat(x) < bounds.width {
+            let text = "\(x)" as NSString
+            let w = text.size(withAttributes: tick).width + 3
+            drawing.cgContext.fill(CGRect(x: CGFloat(x) - w / 2, y: bounds.height - 13, width: w, height: 13))
+            text.draw(at: CGPoint(x: CGFloat(x) - w / 2 + 1.5, y: bounds.height - 12), withAttributes: tick)
+            x += grid
+          }
+          y = grid
+          while CGFloat(y) < bounds.height {
+            let text = "\(y)" as NSString
+            let w = text.size(withAttributes: tick).width + 3
+            drawing.cgContext.fill(CGRect(x: 0, y: CGFloat(y) - 6, width: w, height: 12))
+            text.draw(at: CGPoint(x: 1.5, y: CGFloat(y) - 6), withAttributes: tick)
+            y += grid
+          }
         }
       }
       guard let pixels = rendered.cgImage else { throw IOSPhoneScreenError.invalid }
