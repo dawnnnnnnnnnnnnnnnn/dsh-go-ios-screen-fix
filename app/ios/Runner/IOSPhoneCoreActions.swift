@@ -396,7 +396,38 @@ final class IOSPhoneCoreActions {
       + lines.joined(separator: "\n") + "\n\n最后观察：\n" + (finalOutput?.text ?? ""))
   }
 
+  /// The installed-app list read straight from LSApplicationWorkspace.
+  ///
+  /// This is the same private object `requestForeground` already uses to
+  /// activate apps, so it costs nothing new in terms of risk, and it answers from
+  /// memory: every entry carries a localised display name, which is exactly what
+  /// a name like "美团" has to be resolved against. Returns nil when the selectors
+  /// are unavailable, in which case the CoreDevice path still runs.
+  static func workspaceApplications() -> [[String: String]]? {
+    guard let type = NSClassFromString("LSApplicationWorkspace") as? NSObject.Type,
+      let workspace = type.perform(NSSelectorFromString("defaultWorkspace"))?.takeUnretainedValue() as? NSObject
+    else { return nil }
+    let listSelector = NSSelectorFromString("allInstalledApplications")
+    guard workspace.responds(to: listSelector),
+      let list = workspace.perform(listSelector)?.takeUnretainedValue() as? [NSObject] else { return nil }
+    let nameSelector = NSSelectorFromString("localizedName")
+    let idSelector = NSSelectorFromString("applicationIdentifier")
+    var out: [[String: String]] = []
+    out.reserveCapacity(list.count)
+    for app in list {
+      guard let name = app.perform(nameSelector)?.takeUnretainedValue() as? String,
+        let id = app.perform(idSelector)?.takeUnretainedValue() as? String,
+        !name.isEmpty, name.utf8.count <= 512, !id.isEmpty, id.utf8.count <= 255 else { continue }
+      out.append(["name": name, "id": id])
+    }
+    return out
+  }
+
   private func applications(_ execution: Execution, current: @escaping () -> Bool) async throws -> [[String: String]] {
+    // Fast path first: the same private workspace that already activates apps can
+    // enumerate them straight from memory, with localised names. No RSD round
+    // trip, no CoreDevice metadata scan, no 35 s budget to blow.
+    if let local = Self.workspaceApplications(), !local.isEmpty { return local }
     let reply = try await send(["op": "apps"], execution, current: current)
     guard reply.metadata.kind == "apps", let data = reply.bytes, data.count <= 1024 * 1024,
       let value = try? JSONDecoder().decode([String: [[String: String]]].self, from: data),
