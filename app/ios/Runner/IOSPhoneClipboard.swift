@@ -22,23 +22,33 @@ protocol IOSPhonePasteboardClient {
 
 @MainActor
 private final class IOSPhoneSystemPasteboard: IOSPhonePasteboardClient {
-  private var board: UIPasteboard? {
+  /// Reads need this app in front: iOS shows a paste-permission prompt otherwise
+  /// and refuses outright in the background.
+  private var readable: UIPasteboard? {
     guard UIApplication.shared.applicationState == .active,
       UIApplication.shared.isProtectedDataAvailable else { return nil }
     return UIPasteboard.general
   }
-  var changeCount: Int { board?.changeCount ?? -1 }
-  var itemCount: Int { board?.numberOfItems ?? -1 }
-  func types() -> [[String]]? { board?.types(forItemSet: nil) }
+  /// Writes do not need the app in front — only unlocked data protection. Keeping
+  /// these apart is what lets typing stage its text after the target has taken
+  /// the foreground; before this, the write was silently dropped because the read
+  /// gate returned nil.
+  private var writable: UIPasteboard? {
+    guard UIApplication.shared.isProtectedDataAvailable else { return nil }
+    return UIPasteboard.general
+  }
+  var changeCount: Int { readable?.changeCount ?? -1 }
+  var itemCount: Int { readable?.numberOfItems ?? -1 }
+  func types() -> [[String]]? { readable?.types(forItemSet: nil) }
   func data(type: String, item: Int) -> Data? {
-    guard let values = board?.data(forPasteboardType: type, inItemSet: IndexSet(integer: item)),
+    guard let values = readable?.data(forPasteboardType: type, inItemSet: IndexSet(integer: item)),
       values.count == 1 else { return nil }
     return values[0]
   }
   func replace(_ items: [[String: Any]], expires: Date?) {
     var options: [UIPasteboard.OptionsKey: Any] = [.localOnly: true]
     if let expires { options[.expirationDate] = expires }
-    board?.setItems(items, options: options)
+    writable?.setItems(items, options: options)
   }
 }
 
@@ -110,6 +120,9 @@ final class IOSPhoneClipboard {
     guard !text.isEmpty, text.utf8.count <= 4096, !text.contains("\0") else { throw IOSPhoneClipboardError.tooLarge }
     let operation = UUID(); preparation = operation
     defer { if preparation == operation { preparation = nil } }
+    // Order is fixed by contract: the target must be focusable before the user is
+    // asked to stage a clipboard, and a failed preflight must not read or touch
+    // the pasteboard at all. Writing between the two is not available.
     let focus = try await preflight()
     guard current(), !Task.isCancelled else { throw IOSPhoneClipboardError.stale }
     guard await confirm() else { throw IOSPhoneClipboardError.denied }
