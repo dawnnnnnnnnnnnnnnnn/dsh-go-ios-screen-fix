@@ -145,6 +145,16 @@ final class IOSPhoneTaskConsent {
       && self.grantOwner == owner && self.isGranted
       && request.expiresAt > Date().timeIntervalSince1970 * 1000 }
     guard live() else { return false }
+    // Already in the background with a granted task: the write needs only
+    // unlocked data protection, and an unreadable snapshot now falls back to a
+    // plain write. Forcing a sheet here means asking the user to leave the app
+    // they are typing into, come back, approve what the task grant already
+    // showed, and leave again — for a decision already made.
+    //
+    // In the foreground the sheet still runs, so the original contract (its own
+    // confirmation, never extending the grant) is unchanged wherever it can be
+    // honoured.
+    if !foreground { return true }
     let refused = onClipboardRefusal
     var admitted = false
     defer { if !admitted { refused?() } }
